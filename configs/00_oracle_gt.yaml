@@ -1,0 +1,5 @@
+name: 00_oracle_gt
+split: val
+predictor:
+  type: oracle_gt
+  params: {}

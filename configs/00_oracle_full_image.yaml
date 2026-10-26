@@ -1,0 +1,5 @@
+name: 00_oracle_full_image
+split: val
+predictor:
+  type: oracle_full_image
+  params: {}

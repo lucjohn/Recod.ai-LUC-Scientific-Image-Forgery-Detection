@@ -1,0 +1,5 @@
+name: 00_all_authentic
+split: val
+predictor:
+  type: all_authentic
+  params: {}
