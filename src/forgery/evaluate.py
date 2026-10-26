@@ -72,11 +72,12 @@ def summarize(per_image: pd.DataFrame) -> dict:
     }
 
 
-def git_commit() -> str:
+def git_commit(cwd: Path = REPO_ROOT) -> str:
+    """Short HEAD hash, with "-dirty" if tracked files have uncommitted changes."""
     try:
-        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=cwd,
                              capture_output=True, text=True, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT,
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=cwd,
                                capture_output=True, text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"

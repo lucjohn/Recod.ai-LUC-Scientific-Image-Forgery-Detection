@@ -1,8 +1,10 @@
+import subprocess
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from forgery.evaluate import evaluate, score_slice, summarize, validate_masks
+from forgery.evaluate import evaluate, git_commit, score_slice, summarize, validate_masks
 from forgery.predictors import AllAuthentic, OracleFullImage, OracleGT, build_predictor
 from forgery.split import get_slice
 
@@ -47,6 +49,21 @@ def test_bad_masks_rejected():
 def test_unknown_predictor_type(index):
     with pytest.raises(KeyError, match="all_authentic"):
         build_predictor({"type": "magic", "params": {}}, index)
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def test_git_commit_ignores_untracked_files(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "code.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "code.py")
+    _git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+    (tmp_path / "notes.md").write_text("untracked\n")
+    assert not git_commit(tmp_path).endswith("-dirty")
+    (tmp_path / "code.py").write_text("x = 2\n")
+    assert git_commit(tmp_path).endswith("-dirty")
 
 
 def test_results_appended(tmp_path):
