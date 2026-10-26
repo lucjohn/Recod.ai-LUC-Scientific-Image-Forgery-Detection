@@ -9,4 +9,8 @@ opencv-python
 faiss-cpu
 kaggle
 ipykernel
+pandas
+pytest
+jupytext
+nbconvert
 lightglue @ git+https://github.com/cvg/LightGlue.git
