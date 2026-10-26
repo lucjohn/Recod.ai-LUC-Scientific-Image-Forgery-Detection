@@ -37,6 +37,13 @@ def test_masks_match_image_shape(index):
             np.testing.assert_array_equal(rle_decode(rle_encode([mask]), mask.shape).astype(np.uint8), mask)
 
 
+def test_root_without_images_raises(monkeypatch, tmp_path):
+    (tmp_path / "train_images" / "authentic").mkdir(parents=True)
+    monkeypatch.setenv("FORGERY_DATA_ROOT", str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="FORGERY_DATA_ROOT"):
+        build_index()
+
+
 def test_missing_root_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("FORGERY_DATA_ROOT", str(tmp_path / "nope"))
     with pytest.raises(FileNotFoundError, match="FORGERY_DATA_ROOT"):

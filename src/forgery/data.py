@@ -35,9 +35,16 @@ def build_index(root: Path | None = None) -> pd.DataFrame:
         raise FileNotFoundError(
             f"Data root {root} does not exist. Download the data there or set FORGERY_DATA_ROOT."
         )
+    images = {}
+    for source, image_dir, _ in SOURCES:
+        images[source] = sorted((root / image_dir).glob("*.png"), key=lambda p: int(p.stem))
+        if not images[source]:
+            raise FileNotFoundError(
+                f"No PNG images in {root / image_dir}. Is FORGERY_DATA_ROOT ({root}) the unzipped data folder?"
+            )
     rows = []
-    for source, image_dir, mask_dir in SOURCES:
-        for image_path in sorted((root / image_dir).glob("*.png"), key=lambda p: int(p.stem)):
+    for source, _, mask_dir in SOURCES:
+        for image_path in images[source]:
             width, height = Image.open(image_path).size
             mask_path, n_instances = "", 0
             if mask_dir is not None:

@@ -22,6 +22,10 @@ from forgery.split import REPO_ROOT, get_slice
 
 RESULTS_PATH = REPO_ROOT / "experiments" / "results.csv"
 RUNS_DIR = REPO_ROOT / "experiments" / "runs"
+RESULT_COLUMNS = ["timestamp", "name", "git_commit", "split", "n_images", "score",
+                  "acc_authentic", "recall_forged", "mean_of1_detected", "runtime_s"]
+# Untracked files under these folders are code a run may depend on, so they make it "dirty".
+CODE_DIRS = ("src/", "configs/")
 
 
 def validate_masks(masks: list[np.ndarray], shape: tuple[int, int]) -> list[np.ndarray]:
@@ -73,15 +77,38 @@ def summarize(per_image: pd.DataFrame) -> dict:
 
 
 def git_commit(cwd: Path = REPO_ROOT) -> str:
-    """Short HEAD hash, with "-dirty" if tracked files have uncommitted changes."""
+    """Short HEAD hash, with "-dirty" if tracked files changed or new code files are uncommitted.
+
+    Untracked files elsewhere (notes, specs, run outputs) don't affect what ran, so they're ignored.
+    """
     try:
         sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=cwd,
                              capture_output=True, text=True, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=cwd,
-                               capture_output=True, text=True, check=True).stdout.strip()
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=cwd,
+                                capture_output=True, text=True, check=True).stdout.splitlines()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+    dirty = any(not line.startswith("??") or line[3:].startswith(CODE_DIRS) for line in status)
     return f"{sha}-dirty" if dirty else sha
+
+
+def check_config(config: dict, split: str) -> None:
+    """Fail fast, before any scoring, on a config the runner can't record."""
+    if not config.get("name"):
+        raise ValueError("Invalid config: 'name' is required")
+    if not (config.get("predictor") or {}).get("type"):
+        raise ValueError("Invalid config: 'predictor.type' is required")
+    if split not in ("train", "val", "supplemental"):
+        raise ValueError(f"Invalid config: unknown split {split!r}")
+
+
+def check_results_header(results_path: Path) -> None:
+    """Refuse to append to a results file whose columns differ, which would misalign rows."""
+    if results_path.exists():
+        header = results_path.read_text().splitlines()[0].split(",")
+        if header != RESULT_COLUMNS:
+            raise ValueError(f"{results_path} has columns {header}, expected {RESULT_COLUMNS}; "
+                             "move the old file aside before logging new runs")
 
 
 def _new_run_dir(runs_dir: Path, stem: str) -> Path:
@@ -95,7 +122,11 @@ def _new_run_dir(runs_dir: Path, stem: str) -> Path:
 def evaluate(config: dict, split: str | None = None, limit: int | None = None,
              results_path: Path = RESULTS_PATH, runs_dir: Path = RUNS_DIR) -> dict:
     start = time.perf_counter()
-    split = split or config["split"]
+    split = split or config.get("split")
+    results_path = Path(results_path)
+    check_config(config, split)
+    check_results_header(results_path)
+    commit = git_commit()  # recorded now: the code that runs, even if the repo changes mid-run
     index = build_index()
     rows = get_slice(split, index)
     if limit is not None and limit < len(rows):
@@ -112,14 +143,14 @@ def evaluate(config: dict, split: str | None = None, limit: int | None = None,
     result = {
         "timestamp": now.isoformat(timespec="seconds"),
         "name": config["name"],
-        "git_commit": git_commit(),
+        "git_commit": commit,
         "split": split,
         **summarize(per_image),
         "runtime_s": round(time.perf_counter() - start, 1),
     }
-    results_path = Path(results_path)
     results_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([result]).to_csv(results_path, mode="a", header=not results_path.exists(), index=False)
+    pd.DataFrame([result], columns=RESULT_COLUMNS).to_csv(
+        results_path, mode="a", header=not results_path.exists(), index=False)
     return result
 
 

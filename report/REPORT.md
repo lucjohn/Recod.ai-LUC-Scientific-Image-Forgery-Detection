@@ -83,8 +83,8 @@ about the metric, then accepted by the user as their predictions.
 
 All three predictions were right to within 0.004. The one estimate inside them was off: we
 guessed a whole-image mask would earn about 0.06 per forged image, and it earned **0.0742**
-(`mean_of1_detected`). Forged area is skewed: the median forged image is only 2.2% forged, but
-a minority of large forgeries pull the mean up to 5.1%, and those earn much more from a
+(`mean_of1_detected`). Forged area is skewed: the median forged image in val is only 2.2% forged,
+but a minority of large forgeries pull the val mean up to 5.1%, and those earn much more from a
 whole-image mask.
 
 On the supplemental set the whole-image mask earns 0.13 per forged image. Supplemental

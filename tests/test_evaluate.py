@@ -66,7 +66,55 @@ def test_git_commit_ignores_untracked_files(tmp_path):
     assert git_commit(tmp_path).endswith("-dirty")
 
 
-def test_results_appended(tmp_path):
+def test_git_commit_flags_untracked_code(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "README.md").write_text("x\n")
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+    (tmp_path / "src" / "forgery").mkdir(parents=True)
+    (tmp_path / "src" / "forgery" / "new_predictor.py").write_text("x = 1\n")
+    assert git_commit(tmp_path).endswith("-dirty")
+
+
+CONFIG = {"name": "t", "split": "val", "predictor": {"type": "all_authentic", "params": {}}}
+
+
+@pytest.mark.parametrize("broken", [
+    {k: v for k, v in CONFIG.items() if k != "name"},
+    {**CONFIG, "predictor": {"params": {}}},
+], ids=["no_name", "no_predictor_type"])
+def test_bad_config_fails_before_scoring(broken, tmp_path, monkeypatch):
+    def must_not_score(*args, **kwargs):
+        raise AssertionError("scored before validating the config")
+    monkeypatch.setattr("forgery.evaluate.score_slice", must_not_score)
+    with pytest.raises(ValueError, match="config"):
+        evaluate(broken, limit=5, results_path=tmp_path / "r.csv", runs_dir=tmp_path / "runs")
+    assert not (tmp_path / "runs").exists()
+
+
+def test_git_commit_recorded_before_scoring(index, tmp_path, monkeypatch):
+    state = {"phase": "before"}
+    real_score_slice = score_slice
+
+    def scoring_then_commit(*args, **kwargs):
+        result = real_score_slice(*args, **kwargs)
+        state["phase"] = "after"
+        return result
+    monkeypatch.setattr("forgery.evaluate.score_slice", scoring_then_commit)
+    monkeypatch.setattr("forgery.evaluate.git_commit", lambda *a, **k: state["phase"])
+    result = evaluate(CONFIG, limit=3, results_path=tmp_path / "r.csv", runs_dir=tmp_path / "runs")
+    assert result["git_commit"] == "before"
+
+
+def test_results_header_mismatch_refused(tmp_path):
+    results = tmp_path / "results.csv"
+    results.write_text("timestamp,name,score\n2026-01-01,old,0.5\n")
+    with pytest.raises(ValueError, match="columns"):
+        evaluate(CONFIG, limit=3, results_path=results, runs_dir=tmp_path / "runs")
+    assert results.read_text() == "timestamp,name,score\n2026-01-01,old,0.5\n"
+
+
+def test_results_appended(index, tmp_path):
     config = {"name": "t", "split": "val", "predictor": {"type": "all_authentic", "params": {}}}
     results, runs = tmp_path / "results.csv", tmp_path / "runs"
     evaluate(config, limit=5, results_path=results, runs_dir=runs)
