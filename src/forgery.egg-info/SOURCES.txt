@@ -1,7 +1,0 @@
-README.md
-pyproject.toml
-src/forgery/__init__.py
-src/forgery.egg-info/PKG-INFO
-src/forgery.egg-info/SOURCES.txt
-src/forgery.egg-info/dependency_links.txt
-src/forgery.egg-info/top_level.txt
