@@ -1,0 +1,25 @@
+# Reference repo cloned locally (github.com/vlad3996/forgeryscope)
+forgeryscope/
+
+# Data and weights stay local
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+runs/
+*.pt
+*.pth
+*.onnx
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Secrets
+.env
+kaggle.json
+access_token

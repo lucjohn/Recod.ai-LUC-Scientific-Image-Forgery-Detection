@@ -1,0 +1,12 @@
+# Install the CUDA build of PyTorch first (the default PyPI build is CPU-only):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# Then:
+#   pip install -r requirements.txt
+ultralytics
+timm
+albumentations
+opencv-python
+faiss-cpu
+kaggle
+ipykernel
+lightglue @ git+https://github.com/cvg/LightGlue.git
