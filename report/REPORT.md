@@ -73,7 +73,7 @@ about the metric, then accepted by the user as their predictions.
 | Perfect detection, whole-image mask | ~0.50 | Authentic images score 1; a forged region covering ~3% of the image gives F1 ≈ 2 × 0.03 ≈ 0.06 → (475 + 550 × 0.06) / 1025 |
 | Perfect detection, ground-truth mask | 1.0 | Every image is perfect |
 
-#### Results (commit `4662281`, from `experiments/results.csv`)
+#### Results (commit `1caa122`, from `experiments/results.csv`)
 
 | Baseline | Predicted (val) | Actual (val) | Actual (supplemental) |
 |---|---|---|---|
