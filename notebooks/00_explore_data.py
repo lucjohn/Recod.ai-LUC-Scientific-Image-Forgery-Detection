@@ -144,3 +144,42 @@ print(f"val cases: {len(val_cases)} ({len(val_cases & twins)} twin pairs, {len(v
 print(f"val images: {len(val_rows)}")
 print(val_rows.source.value_counts().to_string())
 print(f"authentic share of val images: {(val_rows.source == 'authentic').mean():.3f}")
+
+# %% [markdown]
+# ## 6. How the metric scores a prediction (image 568)
+#
+# Image 568 has two true regions. Below, five hand-made predictions are scored with the real
+# metric code. Note how a missed small region, an extra mask, or merging two regions each cost
+# far more than a slightly-too-big mask.
+
+# %%
+from scipy.ndimage import binary_dilation
+
+from forgery.metric import score_image
+
+gt = load_masks(by_key.loc[("forged", 568), "mask_path"])
+big, small = gt
+junk = np.zeros_like(big)
+junk[:20, :20] = 1
+cases = {
+    "both regions exactly right": [big, small],
+    "big region drawn too large, small region right": [binary_dilation(big, iterations=6).astype(np.uint8), small],
+    "both right, plus one extra junk mask": [big, small, junk],
+    "only the big region (small one missed)": [big],
+    "both regions merged into one mask": [np.maximum(big, small)],
+}
+print(f"true region sizes: {int(big.sum())} and {int(small.sum())} pixels")
+for name, pred in cases.items():
+    print(f"{score_image(pred, gt):.3f}  {name}")
+
+# %% [markdown]
+# ## 7. Validation vs supplemental forgeries
+#
+# The two evaluation sets differ: this explains why a whole-image mask scores much better on
+# supplemental images than on validation images.
+
+# %%
+for name in ("val", "supplemental"):
+    rows = forged[forged.slice == name]
+    print(f"{name:13s} forged={len(rows):4d}  median area={rows.area_fraction.median():.3f}  "
+          f"mean area={rows.area_fraction.mean():.3f}  mean regions={rows.n_instances.mean():.2f}")
