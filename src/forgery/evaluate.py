@@ -26,6 +26,8 @@ RESULT_COLUMNS = ["timestamp", "name", "git_commit", "split", "n_images", "score
                   "acc_authentic", "recall_forged", "mean_of1_detected", "runtime_s"]
 # Untracked files under these folders are code a run may depend on, so they make it "dirty".
 CODE_DIRS = ("src/", "configs/")
+# Runs write their logs here, so changes under it say nothing about the code that ran.
+LOG_DIRS = ("experiments/",)
 
 
 def validate_masks(masks: list[np.ndarray], shape: tuple[int, int]) -> list[np.ndarray]:
@@ -79,7 +81,8 @@ def summarize(per_image: pd.DataFrame) -> dict:
 def git_commit(cwd: Path = REPO_ROOT) -> str:
     """Short HEAD hash, with "-dirty" if tracked files changed or new code files are uncommitted.
 
-    Untracked files elsewhere (notes, specs, run outputs) don't affect what ran, so they're ignored.
+    Untracked files elsewhere (notes, specs, run outputs) don't affect what ran, so they're ignored,
+    as are changes to the experiment logs, which every run appends to.
     """
     try:
         sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=cwd,
@@ -88,7 +91,8 @@ def git_commit(cwd: Path = REPO_ROOT) -> str:
                                 capture_output=True, text=True, check=True).stdout.splitlines()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
-    dirty = any(not line.startswith("??") or line[3:].startswith(CODE_DIRS) for line in status)
+    dirty = any((not line.startswith("??") or line[3:].startswith(CODE_DIRS)) and not line[3:].startswith(LOG_DIRS)
+                for line in status)
     return f"{sha}-dirty" if dirty else sha
 
 

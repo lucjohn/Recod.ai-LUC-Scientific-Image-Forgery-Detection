@@ -76,6 +76,16 @@ def test_git_commit_flags_untracked_code(tmp_path):
     assert git_commit(tmp_path).endswith("-dirty")
 
 
+def test_git_commit_ignores_experiment_logs(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "experiments").mkdir()
+    (tmp_path / "experiments" / "results.csv").write_text("a\n")
+    _git(tmp_path, "add", "experiments/results.csv")
+    _git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+    (tmp_path / "experiments" / "results.csv").write_text("a\nrow from the previous run\n")
+    assert not git_commit(tmp_path).endswith("-dirty")
+
+
 CONFIG = {"name": "t", "split": "val", "predictor": {"type": "all_authentic", "params": {}}}
 
 
