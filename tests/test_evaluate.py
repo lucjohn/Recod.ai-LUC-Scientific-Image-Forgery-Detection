@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from forgery.evaluate import evaluate, git_commit, score_slice, summarize, validate_masks
+from forgery.evaluate import check_config, evaluate, git_commit, score_slice, summarize, validate_masks
 from forgery.predictors import AllAuthentic, OracleFullImage, OracleGT, build_predictor
 from forgery.split import get_slice
 
@@ -127,3 +127,7 @@ def test_results_appended(index, tmp_path):
     for run_dir in run_dirs:
         assert (run_dir / "per_image.csv").exists()
         assert (run_dir / "config.yaml").exists()
+
+
+def test_check_config_accepts_tune():
+    check_config({"name": "x", "predictor": {"type": "all_authentic"}}, "tune")

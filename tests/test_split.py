@@ -1,13 +1,20 @@
 import pytest
 
 from forgery.data import EXCLUDED_SUPPLEMENTAL_IDS
-from forgery.split import get_slice, load_split, make_split
+from forgery.split import get_slice, load_split, make_split, make_tune_split
 
 
 @pytest.fixture
 def split_path(index, tmp_path):
     path = tmp_path / "val_case_ids.txt"
     make_split(index, out_path=path)
+    return path
+
+
+@pytest.fixture
+def tune_path(index, split_path, tmp_path):
+    path = tmp_path / "tune.txt"
+    make_tune_split(index, val_path=split_path, out_path=path)
     return path
 
 
@@ -61,3 +68,33 @@ def test_supplemental_slice(index, split_path):
 def test_unknown_slice(index, split_path):
     with pytest.raises(ValueError):
         get_slice("test", index, split_path)
+
+
+def _tune(index, split_path, tune_path):
+    return get_slice("tune", index, split_path, tune_path)
+
+
+def test_tune_inside_train(index, split_path, tune_path):
+    tune = _tune(index, split_path, tune_path)
+    train = get_slice("train", index, split_path)
+    assert set(tune.sample_id) <= set(train.sample_id)
+    assert not set(tune.case_id) & load_split(split_path)
+
+
+def test_tune_keeps_twins(index, split_path, tune_path):
+    tune = _tune(index, split_path, tune_path)
+    _, twins = _groups(index)
+    for case_id in set(tune.case_id) & twins:
+        assert set(tune[tune.case_id == case_id].source) == {"authentic", "forged"}
+
+
+def test_tune_fraction(index, split_path, tune_path):
+    forged, _ = _groups(index)
+    train_cases = forged - load_split(split_path)
+    assert 0.23 <= len(load_split(tune_path)) / len(train_cases) <= 0.27
+
+
+def test_tune_deterministic(index, split_path, tmp_path):
+    a = make_tune_split(index, val_path=split_path, out_path=tmp_path / "a.txt")
+    b = make_tune_split(index, val_path=split_path, out_path=tmp_path / "b.txt")
+    assert a == b

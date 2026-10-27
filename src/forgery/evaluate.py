@@ -18,7 +18,7 @@ import yaml
 from forgery.data import build_index, load_image, load_masks
 from forgery.metric import score_image
 from forgery.predictors import Predictor, Sample, build_predictor
-from forgery.split import REPO_ROOT, get_slice
+from forgery.split import REPO_ROOT, SLICES, get_slice
 
 RESULTS_PATH = REPO_ROOT / "experiments" / "results.csv"
 RUNS_DIR = REPO_ROOT / "experiments" / "runs"
@@ -98,7 +98,7 @@ def check_config(config: dict, split: str) -> None:
         raise ValueError("Invalid config: 'name' is required")
     if not (config.get("predictor") or {}).get("type"):
         raise ValueError("Invalid config: 'predictor.type' is required")
-    if split not in ("train", "val", "supplemental"):
+    if split not in SLICES:
         raise ValueError(f"Invalid config: unknown split {split!r}")
 
 
@@ -157,7 +157,7 @@ def evaluate(config: dict, split: str | None = None, limit: int | None = None,
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Score a predictor config on a data slice.")
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--split", choices=["train", "val", "supplemental"])
+    parser.add_argument("--split", choices=SLICES)
     parser.add_argument("--limit", type=int, help="score a random subset of this many images")
     args = parser.parse_args(argv)
     config = yaml.safe_load(args.config.read_text())
