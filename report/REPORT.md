@@ -124,3 +124,136 @@ on those) and the Chapter 0 baselines.
 | Tuned detector (`01_sift`) | 0.70 |
 | Single RANSAC (`01_sift_single_ransac`) | not predicted |
 | No RANSAC (`01_sift_no_ransac`) | not predicted |
+
+### How the detector works
+
+From [`notebooks/01_classical.ipynb`](../notebooks/01_classical.ipynb), section 1, and
+[`src/forgery/classical.py`](../src/forgery/classical.py):
+
+1. **Prepare:** grayscale, downscaled to at most 1,024 px on the longer side, optional contrast
+   boost (CLAHE).
+2. **Keypoints:** SIFT finds distinctive spots and describes the texture around each one.
+3. **Self-match:** each keypoint is compared with every other keypoint in the same image. A
+   match is kept only if it is clearly closer than the next-best candidate (the ratio test),
+   or an exact duplicate. Matches between nearby spots are dropped.
+4. **Group:** RANSAC looks for one movement (shift, rotation, scale) that explains many matches
+   at once, removes them, and looks again, up to 4 times. A group needs at least
+   `min_inliers` matches.
+5. **Masks:** for each group, the outline (convex hull) around the source points and around
+   the copy points, grown by `pad` pixels, in one mask layer. No group means authentic.
+
+### Tuning
+
+All 160 combinations of four settings were scored on a **tuning slice**: 25% of the training
+cases (551 cases, 1,027 images), chosen with a fixed seed and stored in
+`splits/tune_case_ids.txt`. Validation was not used. The log is
+`experiments/tuning/01_sift.csv`.
+
+| Setting | Values tried | Chosen |
+|---|---|---|
+| `clahe` | off, on | on |
+| `ratio` | 0.4, 0.5, 0.6, 0.7 | 0.4 |
+| `min_inliers` | 4, 6, 10, 15, 25 | 6 |
+| `pad` (px) | 0, 5, 10, 20 | 10 |
+
+The chosen setting scored **0.574** on the tuning slice. CLAHE was worth about +0.01 and
+padding the masks about +0.017 (the best score with `pad` 0 was 0.558). The strictest `ratio`
+won, and 0.4 is the edge of the grid, so a stricter value might do better still. The grid was
+not widened after seeing this, since that would mean tuning further on the same images.
+
+### Results (commit `930b13b`, from `experiments/results.csv`)
+
+| Run | Predicted (val) | Actual (val) | Authentic left alone | Forged flagged | Mask score when flagged |
+|---|---|---|---|---|---|
+| Tuned detector (`01_sift`) | 0.70 | **0.5704** | 100% | 24.5% | 0.812 |
+| Single RANSAC (at most 1 group) | — | **0.5596** | 100% | 24.5% | 0.730 |
+| No RANSAC (no geometric check) | — | **0.5105** | 98.9% | 27.8% | 0.348 |
+
+On the supplemental set the tuned detector scores **0.2826**. It flags 93.8% of the images,
+but its mask score on them is only 0.301.
+
+The single-RANSAC, no-RANSAC and supplemental rows are labelled `930b13b-dirty`. They ran on
+exactly the same code as the first row. The only change was `results.csv` itself, which the
+first run had appended to. The dirty check has since been fixed to ignore the experiment logs.
+
+**On the Chapter 0 scale:**
+
+| Floor (all authentic) | Whole-image masks | **SIFT + RANSAC** | Ceiling |
+|---|---|---|---|
+| 0.463 | 0.503 | **0.570** | 1.0 |
+
+The detector beats perfect detection with whole-image masks, and covers about 20% of the gap
+from the floor to the ceiling.
+
+**Why the prediction was high:**
+- The score breaks down as (475 × 1.00 + 550 × 0.245 × 0.812) ÷ 1025 = 0.570.
+- Reaching 0.70 would need forged images to contribute more than twice as much: for example,
+  flagging about 54% of them at the same mask quality, instead of 24.5%.
+- The tuning score (0.574) turned out to be a close stand-in for validation (0.570), which
+  is what a well-matched tuning slice should give.
+
+### What each piece buys (validation)
+
+- **The geometric check (RANSAC): +0.049** (0.5105 → 0.5596). Mostly through the masks.
+  - Without it, one outline has to cover the source, the copy and everything in between, so
+    the mask score falls from 0.730 to 0.348.
+  - It also removes the 5 false alarms on authentic images that unchecked matches cause.
+- **Finding several groups: +0.011** (0.5596 → 0.5704). Each duplicated region gets its own
+  mask instead of only the strongest one, which raises the mask score from 0.730 to 0.812.
+- **Tuning** (on the tuning slice): CLAHE about +0.01, mask padding about +0.017.
+
+### Where it fails (validation, `01_sift`)
+
+From the notebook's error analysis, section 4.
+
+**Matching is the bottleneck, not grouping.** Each forged image is counted at the first step
+it fails:
+
+| Step reached | Forged images | Share |
+|---|---|---|
+| Fewer than 6 matches survive the ratio test | 397 | 72.2% |
+| Enough matches, but RANSAC finds no group | 18 | 3.3% |
+| Detected | 135 | 24.5% |
+
+The median forged image yields just **1** match.
+- **Missed images have almost no keypoints in the forged region:** a median of 12, against
+  1,007 for detected ones.
+- **SIFT needs texture, and many copied regions don't have any.** The largest misses in the
+  gallery are smooth western-blot bands and a plain background; one has no keypoints at all
+  inside the forged region.
+
+**By kind of forged image:**
+
+| Forged images | Count | Flagged | Mean score |
+|---|---|---|---|
+| All | 550 | 24.5% | 0.199 |
+| Dark (mean gray < 40) | 192 | 2.1% | 0.009 |
+| Few keypoints (< 50) | 100 | 0% | 0.000 |
+| Tiny forgery (< 1% of image) | 187 | 2.1% | 0.015 |
+| Several regions (2+) | 166 | 21.7% | 0.166 |
+
+**Size decides almost everything.** By quarter of forged area, from the smallest quarter to
+the largest, the share flagged rises from **2.2% → 10.2% → 35.0% → 50.7%**.
+
+**When it fires, it is usually right.**
+- It found the correct number of regions on 121 of the 135 forged images it flagged.
+- **No authentic image was flagged (0 of 475).** The most matches on any authentic image
+  was 8, and a group needs 6 consistent ones.
+- **The detector is precise but blind:** its errors are almost all misses.
+
+**Supplemental shows the opposite failure.** There the detector flags nearly everything, but
+predicts too many masks: 24 of the 48 images get the maximum of 4. 14 of those have only 1
+true region, and every extra mask cuts the score.
+
+### What Chapter 2 needs to fix
+
+- **Find copies without keypoints.** Most misses are smooth, dark or small regions where SIFT
+  sees nothing. A model that predicts every pixel from learned features (segmentation) does
+  not depend on keypoints.
+- **Keep what works here:**
+  - zero false alarms on validation
+  - a mask score of 0.81 when it fires
+
+  Later chapters can combine the two approaches, using this detector where it is confident.
+- **Judge which matches are real.** The supplemental results show that repeated structure can
+  produce extra groups, and the metric charges for every one.
