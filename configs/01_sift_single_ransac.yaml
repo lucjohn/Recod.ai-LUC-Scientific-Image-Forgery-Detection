@@ -1,0 +1,14 @@
+name: 01_sift_single_ransac
+split: val
+predictor:
+  type: sift
+  params:
+    max_side: 1024
+    min_distance: 10
+    ransac: true
+    ransac_threshold: 3.0
+    max_groups: 1
+    clahe: true
+    ratio: 0.4
+    min_inliers: 6
+    pad: 10
