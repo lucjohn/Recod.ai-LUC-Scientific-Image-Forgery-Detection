@@ -2,7 +2,12 @@ import cv2
 import numpy as np
 import pytest
 
-from forgery.classical import N_NEIGHBOURS, Features, extract, match, prepare
+from forgery.classical import (N_NEIGHBOURS, Features, SiftDetector, draw_masks, extract, group, match,
+                               prefix_groups, prepare)
+from forgery.metric import score_image
+from forgery.predictors import Sample, build_predictor
+
+P = dict(clahe=False, ratio=0.5, min_inliers=6, pad=5)
 
 
 def textured(h, w, seed):
@@ -90,3 +95,127 @@ def test_match_unique_pairs():
     f = features(far, [[1, 2], [0, 2], []], [[10, 100], [10, 100], []])
     pairs = match(f, ratio=0.5, min_distance=10)
     assert pairs.shape == (1, 2) and pairs.tolist() == [[0, 1]]
+
+
+def copy_move(img, src_yx, dst_yx, size, gt=None):
+    """Paste img[src:src+size] at dst; returns the image and the true mask (source + copy, one layer)."""
+    img = img.copy()
+    (sy, sx), (dy, dx) = src_yx, dst_yx
+    img[dy:dy + size, dx:dx + size] = img[sy:sy + size, sx:sx + size]
+    gt = np.zeros(img.shape[:2], np.uint8) if gt is None else gt.copy()
+    gt[sy:sy + size, sx:sx + size] = 1
+    gt[dy:dy + size, dx:dx + size] = 1
+    return img, gt
+
+
+def predict(image, **params):
+    return SiftDetector(**params).predict(Sample(0, image))
+
+
+def translations(sizes, seed=0):
+    """Points and pairs for clean copies: group k moves `sizes[k]` random points by its own shift."""
+    rng = np.random.default_rng(seed)
+    shifts = [(300, 0), (0, 300), (300, 300), (150, 450), (450, 150)]
+    src, dst = [], []
+    for k, n in enumerate(sizes):
+        s = rng.uniform(0, 100, (n, 2)) + 10 * k
+        src.append(s)
+        dst.append(s + shifts[k])
+    src, dst = np.concatenate(src), np.concatenate(dst)
+    points = np.concatenate([src, dst]).astype(np.float32)
+    pairs = np.stack([np.arange(len(src)), np.arange(len(src)) + len(src)], axis=1)
+    return points, pairs
+
+
+def test_detects_copy_move():
+    image, gt = copy_move(textured(400, 400, 1), (40, 40), (250, 230), 70)
+    pred = predict(image, **P)
+    assert len(pred) == 1
+    assert score_image(pred, [gt]) > 0.5
+
+
+def test_detects_patch_copied_twice():
+    image, _ = copy_move(textured(400, 400, 2), (40, 40), (40, 250), 70)
+    image, _ = copy_move(image, (40, 40), (250, 150), 70)
+    assert predict(image, **P) != []
+
+
+def test_two_copies_two_layers():
+    image, _ = copy_move(textured(500, 500, 3), (20, 20), (20, 300), 60)
+    image, _ = copy_move(image, (300, 20), (380, 300), 60)
+    assert len(predict(image, **P)) == 2
+
+
+def test_textured_no_copy_is_authentic():
+    assert predict(textured(400, 400, 4), **P) == []
+
+
+def test_flat_image_is_authentic():
+    assert predict(np.full((200, 200, 3), 128, np.uint8), **P) == []
+
+
+def test_group_caps_and_rejects():
+    points, pairs = translations([20, 20, 20])
+    assert [len(g) for g in group(points, pairs, 3.0, 6, 4)] == [20, 20, 20]
+    assert len(group(points, pairs, 3.0, 6, 1)) == 1
+    assert group(points, pairs, 3.0, 25, 4) == []
+
+
+def test_group_orients_pairs():
+    points, pairs = translations([20])
+    flipped = pairs.copy()
+    flipped[:5] = flipped[:5, ::-1]  # some pairs listed copy-first
+    (g,) = group(points, flipped, 3.0, 6, 4)
+    shifts = points[g[:, 1]] - points[g[:, 0]]
+    assert np.allclose(shifts, shifts[0], atol=1e-3)
+
+
+def test_group_deterministic():
+    points, pairs = translations([20, 12, 8])
+    a, b = group(points, pairs, 3.0, 4, 4), group(points, pairs, 3.0, 4, 4)
+    assert len(a) == len(b) and all(np.array_equal(x, y) for x, y in zip(a, b))
+
+
+@pytest.mark.parametrize("m", [4, 10, 15, 25])
+def test_prefix_matches_rerun(m):
+    points, pairs = translations([20, 20, 20, 12, 8])
+    expected = group(points, pairs, 3.0, m, 4)
+    got = prefix_groups(group(points, pairs, 3.0, 4, 4), m)
+    assert len(got) == len(expected) and all(np.array_equal(x, y) for x, y in zip(got, expected))
+
+
+def _square(x, y, side=20):
+    return [[x, y], [x + side, y], [x + side, y + side], [x, y + side]]
+
+
+def test_draw_masks_original_size_and_pad():
+    points = np.array(_square(20, 20) + _square(100, 60), np.float32)  # prepared px
+    g = np.array([[0, 4], [1, 5], [2, 6], [3, 7]])
+    (tight,) = draw_masks(points, [g], scale=0.5, shape=(200, 300), pad=0)
+    (padded,) = draw_masks(points, [g], scale=0.5, shape=(200, 300), pad=5)
+    assert tight.shape == (200, 300) and tight.dtype == np.uint8
+    assert tight[60, 60] == 1 and tight[140, 220] == 1  # source and copy, original px, one layer
+    assert tight[100, 150] == 0  # the gap between them is not filled
+    assert padded.sum() > tight.sum()
+
+
+def test_degenerate_hull_not_empty():
+    points = np.array([[10, 10], [50, 50], [10, 10], [50, 50]], np.float32)
+    (mask,) = draw_masks(points, [np.array([[0, 1], [2, 3]])], scale=1.0, shape=(100, 100), pad=0)
+    assert mask.sum() > 0
+
+
+def test_no_ransac_variant():
+    image, _ = copy_move(textured(400, 400, 1), (40, 40), (250, 230), 70)
+    pred = predict(image, **P, ransac=False)
+    assert len(pred) == 1
+    assert pred[0][75, 75] == 1 and pred[0][285, 265] == 1
+
+
+def test_unknown_param_rejected():
+    with pytest.raises(TypeError):
+        build_predictor({"type": "sift", "params": {**P, "min_inlier": 6}}, index=None)
+
+
+def test_registry_builds_sift():
+    assert isinstance(build_predictor({"type": "sift", "params": P}, index=None), SiftDetector)

@@ -10,6 +10,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
+from forgery.classical import SiftDetector
 from forgery.data import load_masks
 
 
@@ -63,6 +64,7 @@ REGISTRY = {
     "all_authentic": AllAuthentic,
     "oracle_full_image": OracleFullImage,
     "oracle_gt": OracleGT,
+    "sift": SiftDetector,
 }
 
 
