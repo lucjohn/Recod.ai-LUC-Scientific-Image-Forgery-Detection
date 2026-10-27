@@ -1,0 +1,10 @@
+name: 01_sift_tune
+split: tune
+predictor:
+  type: sift
+  params: {max_side: 1024, min_distance: 10, ransac: true, ransac_threshold: 3.0, max_groups: 4}
+grid:
+  clahe: [false, true]
+  ratio: [0.4, 0.5, 0.6, 0.7]
+  min_inliers: [4, 6, 10, 15, 25]
+  pad: [0, 5, 10, 20]

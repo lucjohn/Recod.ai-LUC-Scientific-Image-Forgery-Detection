@@ -1,0 +1,71 @@
+import pandas as pd
+import pytest
+import yaml
+
+from forgery.classical import SiftDetector
+from forgery.evaluate import score_slice
+from forgery.split import REPO_ROOT, get_slice
+from forgery.tune import GRID_KEYS, choose, grid_settings, sweep, write_run_configs
+
+TUNE_CONFIG = yaml.safe_load((REPO_ROOT / "configs" / "01_sift_tune.yaml").read_text())
+FIXED = TUNE_CONFIG["predictor"]["params"]
+
+
+def _log(rows):
+    """A tuning log from (clahe, ratio, min_inliers, pad, score) tuples."""
+    return pd.DataFrame([dict(zip((*GRID_KEYS, "score"), r)) for r in rows])
+
+
+def test_grid_settings_count_and_order():
+    settings = grid_settings(TUNE_CONFIG["grid"])
+    assert len(settings) == 160
+    assert settings[0] == {"clahe": False, "ratio": 0.4, "min_inliers": 4, "pad": 0}
+
+
+def test_grid_rejects_unknown_key():
+    grid = {**TUNE_CONFIG["grid"], "min_inlier": [6]}
+    with pytest.raises(ValueError, match="min_inlier"):
+        grid_settings(grid)
+
+
+def test_grid_rejects_missing_key():
+    grid = {k: v for k, v in TUNE_CONFIG["grid"].items() if k != "pad"}
+    with pytest.raises(ValueError, match="pad"):
+        grid_settings(grid)
+
+
+def test_choose_tie_break():
+    log = _log([(False, 0.5, 6, 5, 0.600), (False, 0.5, 10, 5, 0.599), (False, 0.5, 25, 5, 0.590)])
+    assert choose(log) == {"clahe": False, "ratio": 0.5, "min_inliers": 10, "pad": 5}
+    log = _log([(False, 0.6, 10, 5, 0.600), (False, 0.4, 10, 5, 0.599)])
+    assert choose(log)["ratio"] == 0.4
+
+
+def test_choose_clear_winner():
+    log = _log([(True, 0.7, 4, 20, 0.610), (False, 0.4, 25, 0, 0.600)])
+    chosen = choose(log)
+    assert chosen == {"clahe": True, "ratio": 0.7, "min_inliers": 4, "pad": 20}
+    assert all(type(v) in (bool, float, int) for v in chosen.values())  # plain types, safe for YAML
+
+
+def test_write_run_configs(tmp_path):
+    chosen = {"clahe": True, "ratio": 0.5, "min_inliers": 10, "pad": 5}
+    paths = write_run_configs("01_sift", FIXED, chosen, tmp_path)
+    configs = {p.stem: yaml.safe_load(p.read_text()) for p in paths}
+    assert set(configs) == {"01_sift", "01_sift_single_ransac", "01_sift_no_ransac"}
+    base = configs["01_sift"]
+    assert base["split"] == "val" and base["predictor"] == {"type": "sift", "params": {**FIXED, **chosen}}
+    for name, change in (("01_sift_single_ransac", {"max_groups": 1}), ("01_sift_no_ransac", {"ransac": False})):
+        assert configs[name]["name"] == name and configs[name]["split"] == "val"
+        assert configs[name]["predictor"] == {"type": "sift", "params": {**FIXED, **chosen, **change}}
+
+
+def test_sweep_matches_evaluate(index, tmp_path):
+    tune = get_slice("tune", index)
+    rows = pd.concat([tune[tune.source == "authentic"].sample(3, random_state=0),
+                      tune[tune.source == "forged"].sample(3, random_state=0)])
+    setting = {"clahe": True, "ratio": 0.6, "min_inliers": 6, "pad": 5}
+    log = sweep(rows, FIXED, {k: [v] for k, v in setting.items()}, cache=tmp_path)
+    expected = score_slice(SiftDetector(**FIXED, **setting), rows).score.mean()
+    assert len(log) == 1
+    assert log.score.iloc[0] == pytest.approx(expected, abs=1e-12)
