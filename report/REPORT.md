@@ -106,3 +106,21 @@ Our training and validation forgeries appear to be synthetic: made by copying re
 an image. Kaggle's hidden test set consisted of real cases from published papers. A validation
 score here measures progress on this synthetic distribution, not real-world accuracy, so later
 chapters should treat big jumps with some suspicion and check them on the supplemental set too.
+
+## Chapter 1: Classical baseline (SIFT + RANSAC)
+
+**Goal:** the first real detector, with no learning. It finds copy-moved regions by matching an
+image's SIFT keypoints against themselves, then grouping the matches by a shared movement with
+RANSAC. Tuned on a slice of the training data, scored once on validation.
+
+### Predictions (recorded 2026-10-27, before the validation run)
+
+At prediction time, the user had seen the tuning results (score 0.574 on the 1,027-image tuning
+slice: 98.9% of authentic images left alone, 27.8% of forged images detected, mask score 0.777
+on those) and the Chapter 0 baselines.
+
+| Run | Predicted val score |
+|---|---|
+| Tuned detector (`01_sift`) | 0.70 |
+| Single RANSAC (`01_sift_single_ransac`) | not predicted |
+| No RANSAC (`01_sift_no_ransac`) | not predicted |
