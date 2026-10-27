@@ -125,6 +125,9 @@ on those) and the Chapter 0 baselines.
 | Single RANSAC (`01_sift_single_ransac`) | not predicted |
 | No RANSAC (`01_sift_no_ransac`) | not predicted |
 
+The user gave the number without further reasoning. The analysis of why it differed comes after the
+results, below.
+
 ### How the detector works
 
 From [`notebooks/01_classical.ipynb`](../notebooks/01_classical.ipynb), section 1, and

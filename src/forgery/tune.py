@@ -26,6 +26,7 @@ from forgery.metric import score_image
 from forgery.split import REPO_ROOT, get_slice
 
 GRID_KEYS = ("clahe", "ratio", "min_inliers", "pad")
+FIXED_KEYS = ("max_side", "min_distance", "ransac", "ransac_threshold", "max_groups")
 TUNING_DIR = REPO_ROOT / "experiments" / "tuning"
 CONFIGS_DIR = REPO_ROOT / "configs"
 SUMMARY_COLUMNS = ["score", "acc_authentic", "recall_forged", "mean_of1_detected", "n_images"]
@@ -39,7 +40,28 @@ def grid_settings(grid: dict) -> list[dict]:
     if unknown or missing:
         raise ValueError(f"Invalid grid: unknown keys {sorted(unknown)}, missing keys {sorted(missing)}; "
                          f"expected exactly {list(GRID_KEYS)}")
+    empty = [k for k in GRID_KEYS if not grid[k]]
+    if empty:
+        raise ValueError(f"Invalid grid: no values for {empty}")
     return [dict(zip(GRID_KEYS, values)) for values in itertools.product(*(grid[k] for k in GRID_KEYS))]
+
+
+def check_tune_config(config: dict) -> None:
+    """Fail before any work on a config whose sweep would differ from what its run configs run."""
+    if config.get("split") != "tune":
+        raise ValueError(f"Invalid tune config: split must be 'tune' (validation is never tuned on), "
+                         f"got {config.get('split')!r}")
+    predictor = config.get("predictor") or {}
+    if predictor.get("type") != "sift":
+        raise ValueError(f"Invalid tune config: forgery.tune only tunes the sift detector, got {predictor.get('type')!r}")
+    fixed = predictor.get("params") or {}
+    unknown, missing = set(fixed) - set(FIXED_KEYS), set(FIXED_KEYS) - set(fixed)
+    if unknown or missing:
+        raise ValueError(f"Invalid tune config: unknown params {sorted(unknown)}, missing params {sorted(missing)}; "
+                         f"expected exactly {list(FIXED_KEYS)}")
+    if fixed["ransac"] is not True:
+        raise ValueError("Invalid tune config: the sweep always uses RANSAC grouping, so 'ransac' must be true")
+    grid_settings(config.get("grid") or {})
 
 
 def sweep(rows: pd.DataFrame, fixed: dict, grid: dict, cache: Path | None = None) -> pd.DataFrame:
@@ -95,10 +117,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--limit", type=int, help="tune on a random subset of this many images (smoke test)")
     args = parser.parse_args(argv)
     config = yaml.safe_load(args.config.read_text())
-    if config["predictor"]["type"] != "sift":
-        raise ValueError(f"forgery.tune only tunes the sift detector, got {config['predictor']['type']!r}")
-    grid_settings(config["grid"])  # fail on a bad grid before any work
+    check_tune_config(config)  # fail before any work
     base = config["name"].removesuffix("_tune")
+    smoke = args.limit is not None
     fixed = config["predictor"]["params"]
     commit = git_commit()  # recorded now: the code that runs, even if the repo changes mid-run
 
@@ -108,14 +129,18 @@ def main(argv: list[str] | None = None) -> None:
     log = sweep(rows, fixed, config["grid"])
     log["git_commit"] = commit
     TUNING_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = TUNING_DIR / f"{base}.csv"
+    # A --limit run is a smoke test: it must never replace the real log or the run configs.
+    log_path = TUNING_DIR / f"{base}{'-smoke' if smoke else ''}.csv"
     log[TUNING_COLUMNS].to_csv(log_path, index=False)
 
     chosen = choose(log)
     best = log.loc[(log[list(GRID_KEYS)] == pd.Series(chosen)).all(axis=1)].iloc[0]
     print(f"wrote {log_path} ({len(log)} settings on {len(rows)} images)")
     print(f"chosen: {chosen}  score {best.score:.4f} (best {log.score.max():.4f})")
-    for path in write_run_configs(base, fixed, chosen):
+    if smoke:
+        print("smoke run (--limit): run configs not written")
+        return
+    for path in write_run_configs(base, fixed, chosen, CONFIGS_DIR):
         print(f"wrote {path}")
 
 

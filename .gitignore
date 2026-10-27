@@ -26,3 +26,4 @@ venv/
 .env
 kaggle.json
 access_token
+experiments/tuning/*-smoke.csv

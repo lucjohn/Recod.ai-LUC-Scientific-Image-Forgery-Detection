@@ -5,7 +5,7 @@ import yaml
 from forgery.classical import SiftDetector
 from forgery.evaluate import score_slice
 from forgery.split import REPO_ROOT, get_slice
-from forgery.tune import GRID_KEYS, choose, grid_settings, sweep, write_run_configs
+from forgery.tune import GRID_KEYS, check_tune_config, choose, grid_settings, sweep, write_run_configs
 
 TUNE_CONFIG = yaml.safe_load((REPO_ROOT / "configs" / "01_sift_tune.yaml").read_text())
 FIXED = TUNE_CONFIG["predictor"]["params"]
@@ -69,3 +69,42 @@ def test_sweep_matches_evaluate(index, tmp_path):
     expected = score_slice(SiftDetector(**FIXED, **setting), rows).score.mean()
     assert len(log) == 1
     assert log.score.iloc[0] == pytest.approx(expected, abs=1e-12)
+
+
+@pytest.mark.parametrize("change", [
+    {"params": {**FIXED, "min_inlier": 6}},
+    {"params": {k: v for k, v in FIXED.items() if k != "max_groups"}},
+    {"params": {**FIXED, "ransac": False}},
+    {"split": "val"},
+    {"grid": {**TUNE_CONFIG["grid"], "pad": []}},
+], ids=["typo_param", "missing_param", "ransac_off", "val_split", "empty_grid_values"])
+def test_check_tune_config_rejects(change):
+    config = {**TUNE_CONFIG, "predictor": {**TUNE_CONFIG["predictor"]}}
+    if "params" in change:
+        config["predictor"]["params"] = change.pop("params")
+    config.update(change)
+    with pytest.raises(ValueError):
+        check_tune_config(config)
+
+
+def test_check_tune_config_accepts_committed_config():
+    check_tune_config(TUNE_CONFIG)
+
+
+def test_limited_run_leaves_committed_outputs_alone(tmp_path, monkeypatch):
+    from forgery import tune
+
+    monkeypatch.setattr(tune, "TUNING_DIR", tmp_path / "tuning")
+    monkeypatch.setattr(tune, "CONFIGS_DIR", tmp_path / "configs")
+    (tmp_path / "configs").mkdir()
+    rows = pd.DataFrame({"source": ["forged"] * 3})
+    monkeypatch.setattr(tune, "build_index", lambda: rows)
+    monkeypatch.setattr(tune, "get_slice", lambda name, index: rows)
+    fake_log = pd.DataFrame([{**s, "score": 0.5, "acc_authentic": 1.0, "recall_forged": 0.0,
+                              "mean_of1_detected": float("nan"), "n_images": 2}
+                             for s in grid_settings(TUNE_CONFIG["grid"])])
+    monkeypatch.setattr(tune, "sweep", lambda rows, fixed, grid: fake_log)
+
+    tune.main(["--config", str(REPO_ROOT / "configs" / "01_sift_tune.yaml"), "--limit", "2"])
+    assert [p.name for p in (tmp_path / "tuning").iterdir()] == ["01_sift-smoke.csv"]
+    assert list((tmp_path / "configs").iterdir()) == []
